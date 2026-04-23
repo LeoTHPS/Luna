@@ -686,6 +686,12 @@ private:
 
 		return 1;
 	}
+	static int  Stack_Push(lua_State* lua, const std::string& value, bool p)
+	{
+		lua_pushexternalstring(lua, value.c_str(), value.length(), nullptr, nullptr);
+
+		return 1;
+	}
 	template<typename F>
 	static int  Stack_Push(lua_State* lua, const LunaFunction<F>& value, bool p)
 	{
