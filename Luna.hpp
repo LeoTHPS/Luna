@@ -325,8 +325,14 @@ public:
 		if (!lua || !name)
 			return false;
 
-		lua_pushlightuserdata(lua, (void*)value);
-		lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::C, 1);
+		if (!value)
+			lua_pushnil(lua);
+		else
+		{
+			lua_pushlightuserdata(lua, (void*)value);
+			lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::C, 1);
+		}
+
 		lua_setglobal(lua, name);
 
 		return true;
@@ -337,8 +343,14 @@ public:
 		if (!lua || !name)
 			return false;
 
-		lua_pushlightuserdata(lua, (void*)&value);
-		lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::CPP, 1);
+		if (!value)
+			lua_pushnil(lua);
+		else
+		{
+			lua_pushlightuserdata(lua, (void*)&value);
+			lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::CPP, 1);
+		}
+
 		lua_setglobal(lua, name);
 
 		return true;
