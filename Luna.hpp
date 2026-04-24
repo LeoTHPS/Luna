@@ -415,16 +415,38 @@ private:
 	{
 		if (!lua_isnumber(lua, index))
 		{
-			auto type      = lua_type(lua, index);
-			auto type_name = lua_typename(lua, type);
+			auto type = lua_type(lua, index);
 
-			if (p)
-				luaL_error(lua, "Invalid type at index %d. Found %s, expected %s", index, type_name, lua_typename(lua, LUA_TNUMBER));
+			if (type == LUA_TNIL)
+				value = (T)0;
+			else if ((type == LUA_TSTRING) && std::is_integral<T>::value)
+			{
+				const char* string;
+				size_t      string_length;
 
-			throw LunaException(std::format("Invalid type at index {}. Found {}, expected {}", index, type_name, lua_typename(lua, LUA_TNUMBER)));
+				if ((string = lua_tolstring(lua, index, &string_length)) == nullptr)
+					value = (T)0;
+				else if (string_length == 1)
+					value = (T)*string;
+				else
+				{
+					if (p)
+						luaL_error(lua, "String length must be 1");
+
+					throw LunaException(std::format("String length must be 1"));
+				}
+			}
+			else
+			{
+				auto type_name = lua_typename(lua, type);
+
+				if (p)
+					luaL_error(lua, "Invalid type at index %d. Found %s, expected %s", index, type_name, lua_typename(lua, LUA_TNUMBER));
+
+				throw LunaException(std::format("Invalid type at index {}. Found {}, expected {}", index, type_name, lua_typename(lua, LUA_TNUMBER)));
+			}
 		}
-
-		if constexpr (std::is_floating_point<T>::value)
+		else if constexpr (std::is_floating_point<T>::value)
 			value = (T)lua_tonumber(lua, index);
 		else if constexpr (std::is_enum<T>::value || std::is_integral<T>::value)
 			value = (T)lua_tointeger(lua, index);
