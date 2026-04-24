@@ -23,8 +23,264 @@ enum LUNA_LIBRARY
 	LUNA_LIBRARY_COROUTINE = LUA_COLIBK
 };
 
+class Luna;
+
 template<typename F>
 class LunaFunction;
+
+class LunaTable
+{
+	friend Luna;
+
+	struct Context
+	{
+		size_t     RefCount;
+
+		lua_State* Lua_State;
+		bool       Lua_Ownership;
+		int        Lua_Reference;
+
+		~Context()
+		{
+			if (Lua_Ownership)
+				luaL_unref(Lua_State, LUA_REGISTRYINDEX, Lua_Reference);
+		}
+	};
+
+	Context* context;
+
+public:
+	LunaTable()
+		: context(nullptr)
+	{
+	}
+	LunaTable(LunaTable&& table)
+		: context(table.context)
+	{
+		table.context = nullptr;
+	}
+	LunaTable(const LunaTable& table)
+		: context(table.context)
+	{
+		if (context)
+			++context->RefCount;
+	}
+	LunaTable(lua_State* lua, int reference, bool take_ownership)
+		: context(new Context{
+			.RefCount      = 1,
+			.Lua_State     = lua,
+			.Lua_Ownership = take_ownership,
+			.Lua_Reference = reference
+		})
+	{
+	}
+
+	virtual ~LunaTable()
+	{
+		Release();
+	}
+
+	// @throw LunaException
+	template<typename T>
+	bool GetField(const char* name, T& value) const;
+
+	template<typename T>
+	bool SetField(const char* name, const T& value);
+
+	void Release()
+	{
+		if (context)
+		{
+			if (!--context->RefCount)
+				delete context;
+
+			context = nullptr;
+		}
+	}
+
+	operator bool        () const
+	{
+		return context != nullptr;
+	}
+	operator int         () const
+	{
+		return context ? context->Lua_Reference : LUA_NOREF;
+	}
+	operator lua_Integer () const
+	{
+		return context ? context->Lua_Reference : LUA_NOREF;
+	}
+
+	auto& operator = (LunaTable&& table)
+	{
+		Release();
+
+		context = table.context;
+		table.context = nullptr;
+
+		return *this;
+	}
+	auto& operator = (const LunaTable& table)
+	{
+		Release();
+
+		if (table.context)
+		{
+			context = table.context;
+
+			++context->RefCount;
+		}
+
+		return *this;
+	}
+
+	bool operator == (const LunaTable& table) const
+	{
+		if (context == table.context)
+			return true;
+
+		if (context && table.context)
+			return context->Lua_Reference == table.context->Lua_Reference;
+
+		return false;
+	}
+	bool operator != (const LunaTable& table) const
+	{
+		return context != table.context;
+	}
+};
+
+template<typename T, typename ... TArgs>
+class LunaFunction<T(TArgs ...)>
+{
+	friend Luna;
+
+	struct Context
+	{
+		int                         Type;
+		size_t                      RefCount;
+
+		T(*                         C_Function)(TArgs ...);
+
+		std::function<T(TArgs ...)> CPP_Function;
+
+		lua_State*                  Lua_State;
+		bool                        Lua_Ownership;
+		int                         Lua_Reference;
+
+		~Context()
+		{
+			if (Lua_Ownership)
+				luaL_unref(Lua_State, LUA_REGISTRYINDEX, Lua_Reference);
+		}
+	};
+
+	Context* context;
+
+public:
+	LunaFunction()
+		: context(nullptr)
+	{
+	}
+	template<typename F>
+	LunaFunction(F&& function);
+	LunaFunction(T(*function)(TArgs ...));
+	LunaFunction(LunaFunction&& function)
+		: context(function.context)
+	{
+		function.context = nullptr;
+	}
+	LunaFunction(const LunaFunction& function)
+		: context(function.context)
+	{
+		if (context)
+			++context->RefCount;
+	}
+	LunaFunction(lua_State* lua, int reference, bool take_ownership);
+
+	virtual ~LunaFunction()
+	{
+		Release();
+	}
+
+	void Release()
+	{
+		if (context)
+		{
+			if (!--context->RefCount)
+				delete context;
+
+			context = nullptr;
+		}
+	}
+
+	operator bool        () const
+	{
+		return context != nullptr;
+	}
+	operator int         () const;
+	operator lua_Integer () const;
+
+	// @throw LunaException
+	T     operator () (TArgs ... args) const;
+
+	auto& operator = (LunaFunction&& function)
+	{
+		Release();
+
+		context = function.context;
+		function.context = nullptr;
+
+		return *this;
+	}
+	auto& operator = (const LunaFunction& function)
+	{
+		Release();
+
+		if (function.context)
+		{
+			context = function.context;
+
+			++context->RefCount;
+		}
+
+		return *this;
+	}
+
+	bool operator == (const LunaFunction& function) const
+	{
+		if (context == function.context)
+			return true;
+
+		if (context && function.context)
+			return context->Lua_Reference == function.context->Lua_Reference;
+
+		return false;
+	}
+	bool operator != (const LunaFunction& function) const
+	{
+		return context != function.context;
+	}
+
+private:
+	// @throw LunaException
+	static int C(lua_State* lua)
+	{
+		return C(lua, std::make_index_sequence<sizeof...(TArgs)> {});
+	}
+	// @throw LunaException
+	template<size_t ... I>
+	static int C(lua_State* lua, std::index_sequence<I ...>);
+
+	// @throw LunaException
+	static int CPP(lua_State* lua)
+	{
+		return CPP(lua, std::make_index_sequence<sizeof...(TArgs)> {});
+	}
+	// @throw LunaException
+	template<size_t ... I>
+	static int CPP(lua_State* lua, std::index_sequence<I ...>);
+};
 
 class LunaException
 	: public std::exception
@@ -61,6 +317,7 @@ public:
 
 class Luna
 {
+	friend class LunaTable;
 	template<typename F>
 	friend class LunaFunction;
 
@@ -105,7 +362,7 @@ public:
 	}
 
 	// @throw LunaException
-	inline bool Run(const char* lua)
+	bool Run(const char* lua)
 	{
 		if (!this->lua || !lua)
 			return false;
@@ -116,7 +373,7 @@ public:
 		return true;
 	}
 	// @throw LunaException
-	inline bool RunFile(const char* path)
+	bool RunFile(const char* path)
 	{
 		if (!lua || !path)
 			return false;
@@ -127,184 +384,23 @@ public:
 		return true;
 	}
 
+	// @throw LunaException
 	template<typename T>
-	inline bool GetGlobal(const char* name, T& value) const
+	bool GetGlobal(const char* name, T& value) const
 	{
 		if (!lua || !name)
 			return false;
 
-		if constexpr (std::is_floating_point<T>::value)
-		{
-			int type;
-
-			if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-				return false;
-
-			if (type != LUA_TNUMBER)
-			{
-				lua_pop(lua, 1);
-
-				return false;
-			}
-
-			value = (T)lua_tonumber(lua, -1);
-
-			lua_pop(lua, 1);
-
-			return true;
-		}
-		else if constexpr (std::is_enum<T>::value || std::is_integral<T>::value)
-		{
-			int type;
-
-			if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-				return false;
-
-			if (type != LUA_TNUMBER)
-			{
-				lua_pop(lua, 1);
-
-				return false;
-			}
-
-			value = (T)lua_tointeger(lua, -1);
-
-			lua_pop(lua, 1);
-
-			return true;
-		}
-		else
-			static_assert(false, "Type not supported");
-	}
-	template<typename T>
-	inline bool GetGlobal(const char* name, T*& value) const
-	{
-		int type;
-
-		if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
+		if (lua_getglobal(lua, name) == LUA_TNONE)
 			return false;
 
-		if (type != LUA_TLIGHTUSERDATA)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		value = (T*)lua_touserdata(lua, -1);
-
-		lua_pop(lua, 1);
-
-		return true;
-	}
-	inline bool GetGlobal(const char* name, bool& value) const
-	{
-		int type;
-
-		if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-			return false;
-
-		if (type != LUA_TBOOLEAN)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		value = lua_toboolean(lua, -1);
-
-		lua_pop(lua, 1);
-
-		return true;
-	}
-	inline bool GetGlobal(const char* name, char& value) const
-	{
-		int type;
-
-		if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-			return false;
-
-		if (type != LUA_TSTRING)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		const char* string;
-		size_t      string_length;
-
-		if ((string = lua_tolstring(lua, -1, &string_length)) == nullptr)
-			string_length = 0;
-
-		if (string_length != 1)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		value = string_length ? *string : 0;
-
-		lua_pop(lua, 1);
-
-		return true;
-	}
-	inline bool GetGlobal(const char* name, std::string& value) const
-	{
-		int type;
-
-		if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-			return false;
-
-		if (type != LUA_TSTRING)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		const char* string;
-		size_t      string_length;
-
-		if ((string = lua_tolstring(lua, -1, &string_length)) == nullptr)
-			string_length = 0;
-
-		value.assign(string, string_length);
-
-		return true;
-	}
-	template<typename F>
-	inline bool GetGlobal(const char* name, LunaFunction<F>& value) const
-	{
-		int type;
-
-		if ((type = lua_getglobal(lua, name)) == LUA_TNONE)
-			return false;
-
-		if (type != LUA_TFUNCTION)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		int reference;
-
-		if ((reference = luaL_ref(lua, LUA_REGISTRYINDEX)) == LUA_NOREF)
-		{
-			lua_pop(lua, 1);
-
-			return false;
-		}
-
-		value = LunaFunction<F>(lua, reference, true);
+		Stack_Pop(lua, value, false);
 
 		return true;
 	}
 
 	template<typename T>
-	inline bool SetGlobal(const char* name, const T& value)
+	bool SetGlobal(const char* name, const T& value)
 	{
 		if (!lua || !name)
 			return false;
@@ -314,44 +410,8 @@ public:
 
 		return true;
 	}
-	template<typename T, typename ... TArgs>
-	inline bool SetGlobal(const char* name, T(*value)(TArgs ...))
-	{
-		if (!lua || !name)
-			return false;
 
-		if (!value)
-			lua_pushnil(lua);
-		else
-		{
-			lua_pushlightuserdata(lua, (void*)value);
-			lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::C, 1);
-		}
-
-		lua_setglobal(lua, name);
-
-		return true;
-	}
-	template<typename T, typename ... TArgs>
-	inline bool SetGlobal(const char* name, const std::function<T(TArgs ...)>& value)
-	{
-		if (!lua || !name)
-			return false;
-
-		if (!value)
-			lua_pushnil(lua);
-		else
-		{
-			lua_pushlightuserdata(lua, (void*)&value);
-			lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::CPP, 1);
-		}
-
-		lua_setglobal(lua, name);
-
-		return true;
-	}
-
-	inline bool LoadLibrary(int mask)
+	bool LoadLibrary(int mask)
 	{
 		if (!lua)
 			return false;
@@ -361,7 +421,26 @@ public:
 		return true;
 	}
 
-	inline bool RemoveGlobal(const char* name)
+	auto CreateTable()
+	{
+		LunaTable value;
+
+		if (lua)
+		{
+			lua_newtable(lua);
+
+			int reference;
+
+			if ((reference = luaL_ref(lua, LUA_REGISTRYINDEX)) == LUA_NOREF)
+				lua_pop(lua, 1);
+			else
+				value = LunaTable(lua, reference, true);
+		}
+
+		return value;
+	}
+
+	bool RemoveGlobal(const char* name)
 	{
 		if (!lua || !name)
 			return false;
@@ -620,6 +699,36 @@ private:
 		}
 	}
 	// @throw LunaException
+	static void Stack_Peek(lua_State* lua, int index, LunaTable& value, bool p)
+	{
+		if (lua_isnil(lua, index))
+			value = LunaTable();
+		else if (!lua_istable(lua, index))
+		{
+			auto type      = lua_type(lua, index);
+			auto type_name = lua_typename(lua, type);
+
+			if (p)
+				luaL_error(lua, "Invalid type at index %d. Found %s, expected %s", index, type_name, lua_typename(lua, LUA_TTABLE));
+
+			throw LunaException(std::format("Invalid type at index {}. Found {}, expected {}", index, type_name, lua_typename(lua, LUA_TTABLE)));
+		}
+
+		int reference;
+
+		if ((reference = luaL_ref(lua, LUA_REGISTRYINDEX)) == LUA_NOREF)
+		{
+			lua_pop(lua, 1);
+
+			if (p)
+				luaL_error(lua, "luaL_ref returned %d", reference);
+
+			throw LunaException("luaL_ref", reference);
+		}
+
+		value = LunaTable(lua, reference, true);
+	}
+	// @throw LunaException
 	template<typename F>
 	static void Stack_Peek(lua_State* lua, int index, LunaFunction<F>& value, bool p)
 	{
@@ -721,10 +830,53 @@ private:
 
 		return 1;
 	}
+	static int  Stack_Push(lua_State* lua, const LunaTable& value, bool p)
+	{
+		if (!value)
+		{
+			lua_pushnil(lua);
+
+			return 1;
+		}
+
+		lua_rawgeti(lua, LUA_REGISTRYINDEX, value.context->Lua_Reference);
+
+		return 1;
+	}
+	template<typename T, typename ... TArgs>
+	static int  Stack_Push(lua_State* lua, T(*value)(TArgs ...), bool p)
+	{
+		if (!value)
+		{
+			lua_pushnil(lua);
+
+			return 1;
+		}
+
+		lua_pushlightuserdata(lua, (void*)value);
+		lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::C, 1);
+
+		return 1;
+	}
+	template<typename T, typename ... TArgs>
+	static int  Stack_Push(lua_State* lua, const LunaFunction<T(TArgs ...)>& value, bool p)
+	{
+		if (!value)
+		{
+			lua_pushnil(lua);
+
+			return 1;
+		}
+
+		lua_pushlightuserdata(lua, (void*)&value);
+		lua_pushcclosure(lua, &LunaFunction<T(TArgs ...)>::CPP, 1);
+
+		return 1;
+	}
 	template<typename F>
 	static int  Stack_Push(lua_State* lua, const LunaFunction<F>& value, bool p)
 	{
-		if (!value.context)
+		if (!value)
 		{
 			lua_pushnil(lua);
 
@@ -762,239 +914,139 @@ private:
 	}
 };
 
-template<typename T, typename ... TArgs>
-class LunaFunction<T(TArgs ...)>
-	: public LunaFunction<T(*)(TArgs ...)>
+template<typename T>
+inline bool LunaTable::GetField(const char* name, T& value) const
 {
-public:
-	using LunaFunction<T(*)(TArgs ...)>::LunaFunction;
-};
-template<typename T, typename ... TArgs>
-class LunaFunction<T(*)(TArgs ...)>
+	if (!context || !name)
+		return false;
+
+	lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference);
+	Luna::Stack_Pop(context->Lua_State, value, false);
+	lua_pop(context->Lua_State, 1);
+
+	return true;
+}
+template<typename T>
+inline bool LunaTable::SetField(const char* name, const T& value)
 {
-	friend Luna;
+	if (!context || !name)
+		return false;
 
-	struct Context
+	lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference);
+	Luna::Stack_Push(context->Lua_State, value, false);
+	lua_setfield(context->Lua_State, -2, name);
+	lua_pop(context->Lua_State, 1);
+
+	return true;
+}
+
+template<typename T, typename ... TArgs>
+template<typename F>
+inline LunaFunction<T(TArgs ...)>::LunaFunction(F&& function)
+	: context(new Context{
+		.Type         = Luna::FUNCTION_TYPE_CPP,
+		.RefCount     = 1,
+		.CPP_Function = std::move(function)
+	})
+{
+}
+template<typename T, typename ... TArgs>
+inline LunaFunction<T(TArgs ...)>::LunaFunction(T(*function)(TArgs ...))
+	: context(new Context{
+		.Type       = Luna::FUNCTION_TYPE_C,
+		.RefCount   = 1,
+		.C_Function = function
+	})
+{
+}
+template<typename T, typename ... TArgs>
+inline LunaFunction<T(TArgs ...)>::LunaFunction(lua_State* lua, int reference, bool take_ownership)
+	: context(new Context{
+		.Type          = Luna::FUNCTION_TYPE_LUA,
+		.RefCount      = 1,
+		.Lua_State     = lua,
+		.Lua_Ownership = take_ownership,
+		.Lua_Reference = reference
+	})
+{
+}
+template<typename T, typename ... TArgs>
+inline LunaFunction<T(TArgs ...)>::operator int () const
+{
+	return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
+}
+template<typename T, typename ... TArgs>
+inline LunaFunction<T(TArgs ...)>::operator lua_Integer () const
+{
+	return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
+}
+template<typename T, typename ... TArgs>
+inline T LunaFunction<T(TArgs ...)>::operator () (TArgs ... args) const
+{
+	if (context)
 	{
-		int                         Type;
-		size_t                      RefCount;
-
-		T(*                         C_Function)(TArgs ...);
-
-		std::function<T(TArgs ...)> CPP_Function;
-
-		lua_State*                  Lua_State;
-		bool                        Lua_Ownership;
-		int                         Lua_Reference;
-
-		~Context()
+		switch (context->Type)
 		{
-			if (Lua_Ownership)
-				luaL_unref(Lua_State, LUA_REGISTRYINDEX, Lua_Reference);
+			case Luna::FUNCTION_TYPE_C:
+				return context->C_Function(std::forward<TArgs>(args) ...);
+
+			case Luna::FUNCTION_TYPE_CPP:
+				return context->CPP_Function(std::forward<TArgs>(args) ...);
 		}
-	};
 
-	Context* context;
+		if (lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference) != LUA_TFUNCTION)
+			throw LunaException("lua_rawgeti", context->Lua_State);
 
-public:
-	LunaFunction()
-		: context(nullptr)
-	{
-	}
-	template<typename F>
-	LunaFunction(F&& function)
-		: context(new Context{
-			.Type         = Luna::FUNCTION_TYPE_CPP,
-			.RefCount     = 1,
-			.CPP_Function = std::move(function)
-		})
-	{
-	}
-	LunaFunction(T(*function)(TArgs ...))
-		: context(new Context{
-			.Type       = Luna::FUNCTION_TYPE_C,
-			.RefCount   = 1,
-			.C_Function = function
-		})
-	{
-	}
-	LunaFunction(LunaFunction&& function)
-		: context(function.context)
-	{
-		function.context = nullptr;
-	}
-	LunaFunction(const LunaFunction& function)
-		: context(function.context)
-	{
-		if (context)
-			++context->RefCount;
-	}
-	LunaFunction(lua_State* lua, int reference, bool take_ownership)
-		: context(new Context{
-			.Type          = Luna::FUNCTION_TYPE_LUA,
-			.RefCount      = 1,
-			.Lua_State     = lua,
-			.Lua_Ownership = take_ownership,
-			.Lua_Reference = reference
-		})
-	{
-	}
-
-	virtual ~LunaFunction()
-	{
-		Release();
-	}
-
-	constexpr bool IsC() const
-	{
-		return context && (context->Type == Luna::FUNCTION_TYPE_C);
-	}
-	constexpr bool IsCPP() const
-	{
-		return context && (context->Type == Luna::FUNCTION_TYPE_CPP);
-	}
-	constexpr bool IsLua() const
-	{
-		return context && (context->Type == Luna::FUNCTION_TYPE_LUA);
-	}
-
-	inline void Release()
-	{
-		if (context)
+		if constexpr (sizeof...(TArgs) == 0)
 		{
-			if (!--context->RefCount)
-				delete context;
-
-			context = nullptr;
-		}
-	}
-
-	constexpr       operator bool        () const
-	{
-		return context != nullptr;
-	}
-	constexpr       operator int         () const
-	{
-		return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
-	}
-	constexpr       operator lua_Integer () const
-	{
-		return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
-	}
-
-	// @throw LunaException
-	inline    T     operator () (TArgs ... args) const
-	{
-		if (context)
-		{
-			switch (context->Type)
+			if constexpr (std::is_same<T, void>::value)
 			{
-				case Luna::FUNCTION_TYPE_C:
-					return context->C_Function(std::forward<TArgs>(args) ...);
-
-				case Luna::FUNCTION_TYPE_CPP:
-					return context->CPP_Function(std::forward<TArgs>(args) ...);
-			}
-
-			if (lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference) != LUA_TFUNCTION)
-				throw LunaException("lua_rawgeti", context->Lua_State);
-
-			if constexpr (sizeof...(TArgs) == 0)
-			{
-				if constexpr (std::is_same<T, void>::value)
-				{
-					if (lua_pcall(context->Lua_State, 0, 0, 0) != LUA_OK)
-						throw LunaException("lua_pcall", context->Lua_State);
-				}
-				else
-				{
-					if (lua_pcall(context->Lua_State, 0, LUA_MULTRET, 0) != LUA_OK)
-						throw LunaException("lua_pcall", context->Lua_State);
-
-					return Luna::Stack_Pop<T>(context->Lua_State, false);
-				}
-			}
-			else if constexpr (std::is_same<T, void>::value)
-			{
-				if (lua_pcall(context->Lua_State, (Luna::Stack_Push(context->Lua_State, args, false) + ...), 0, 0) != LUA_OK)
+				if (lua_pcall(context->Lua_State, 0, 0, 0) != LUA_OK)
 					throw LunaException("lua_pcall", context->Lua_State);
 			}
 			else
 			{
-				if (lua_pcall(context->Lua_State, (Luna::Stack_Push(context->Lua_State, args, false) + ...), LUA_MULTRET, 0) != LUA_OK)
+				if (lua_pcall(context->Lua_State, 0, LUA_MULTRET, 0) != LUA_OK)
 					throw LunaException("lua_pcall", context->Lua_State);
 
 				return Luna::Stack_Pop<T>(context->Lua_State, false);
 			}
 		}
-
-		return T();
-	}
-
-	inline    auto& operator = (LunaFunction&& function)
-	{
-		Release();
-
-		context = function.context;
-		function.context = nullptr;
-
-		return *this;
-	}
-	inline    auto& operator = (const LunaFunction& function)
-	{
-		Release();
-
-		if (function.context)
+		else if constexpr (std::is_same<T, void>::value)
 		{
-			context = function.context;
-
-			++context->RefCount;
+			if (lua_pcall(context->Lua_State, (Luna::Stack_Push(context->Lua_State, args, false) + ...), 0, 0) != LUA_OK)
+				throw LunaException("lua_pcall", context->Lua_State);
 		}
-
-		return *this;
-	}
-
-	constexpr bool  operator == (const LunaFunction& function) const
-	{
-		return context == function.context;
-	}
-	constexpr bool  operator != (const LunaFunction& function) const
-	{
-		return context != function.context;
-	}
-
-private:
-	// @throw LunaException
-	static int C(lua_State* lua)
-	{
-		return C(lua, std::make_index_sequence<sizeof...(TArgs)> {});
-	}
-	// @throw LunaException
-	template<size_t ... I>
-	static int C(lua_State* lua, std::index_sequence<I ...>)
-	{
-		auto function = (T(*)(TArgs ...))lua_touserdata(lua, lua_upvalueindex(1));
-
-		if constexpr (std::is_same<T, void>::value)
-			return function(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), 0;
 		else
-			return Luna::Stack_Push(lua, function(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), true);
+		{
+			if (lua_pcall(context->Lua_State, (Luna::Stack_Push(context->Lua_State, args, false) + ...), LUA_MULTRET, 0) != LUA_OK)
+				throw LunaException("lua_pcall", context->Lua_State);
+
+			return Luna::Stack_Pop<T>(context->Lua_State, false);
+		}
 	}
 
-	// @throw LunaException
-	static int CPP(lua_State* lua)
-	{
-		return CPP(lua, std::make_index_sequence<sizeof...(TArgs)> {});
-	}
-	// @throw LunaException
-	template<size_t ... I>
-	static int CPP(lua_State* lua, std::index_sequence<I ...>)
-	{
-		auto function = (std::function<T(TArgs ...)>*)lua_touserdata(lua, lua_upvalueindex(1));
+	return T();
+}
+template<typename T, typename ... TArgs>
+template<size_t ... I>
+inline int LunaFunction<T(TArgs ...)>::C(lua_State* lua, std::index_sequence<I ...>)
+{
+	auto function = (T(*)(TArgs ...))lua_touserdata(lua, lua_upvalueindex(1));
 
-		if constexpr (std::is_same<T, void>::value)
-			return (*function)(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), 0;
-		else
-			return Luna::Stack_Push(lua, (*function)(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), true);
-	}
-};
+	if constexpr (std::is_same<T, void>::value)
+		return function(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), 0;
+	else
+		return Luna::Stack_Push(lua, function(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), true);
+}
+template<typename T, typename ... TArgs>
+template<size_t ... I>
+inline int LunaFunction<T(TArgs ...)>::CPP(lua_State* lua, std::index_sequence<I ...>)
+{
+	auto function = (std::function<T(TArgs ...)>*)lua_touserdata(lua, lua_upvalueindex(1));
+
+	if constexpr (std::is_same<T, void>::value)
+		return (*function)(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), 0;
+	else
+		return Luna::Stack_Push(lua, (*function)(Luna::Stack_Peek<typename std::tuple_element<I, std::tuple<TArgs ...>>::type>(lua, I + 1, true) ...), true);
+}

@@ -1,34 +1,37 @@
 #include "Luna.hpp"
 
+#include <ctime>
 #include <iostream>
 
-int a = 0;
-int b = 0;
-
-int do_the_thing(int a, int b)
+uint32_t time_now()
 {
-	::a = a;
-	::b = b;
-
-	return a + b;
+	return std::time(nullptr);
 }
-int run_the_thing(LunaFunction<int(int a, int b)> callback)
+uint32_t time_elapsed(uint32_t time)
 {
-	return callback(a, b);
+	return std::time(nullptr) - time;
 }
 
 int main(int argc, char* argv[])
 {
 	Luna luna;
 
-	luna.SetGlobal("do_the_thing", do_the_thing);
-	luna.SetGlobal("run_the_thing", run_the_thing);
 	luna.LoadLibrary(LUNA_LIBRARY_BASE);
+
+	if (auto time = luna.CreateTable())
+	{
+		time.SetField("now",     &time_now);
+		time.SetField("elapsed", &time_elapsed);
+
+		luna.SetGlobal("time", time);
+	}
+
+	luna.SetGlobal("time_now",     &time_now);
+	luna.SetGlobal("time_elapsed", &time_elapsed);
 
 	try
 	{
-		luna.Run("print(do_the_thing(1, 1));");
-		luna.Run("print(run_the_thing(function(a, b) return a + b; end));");
+		luna.RunFile("demo.lua");
 	}
 	catch (const std::exception& e)
 	{
