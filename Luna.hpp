@@ -104,13 +104,8 @@ public:
 		}
 	}
 
-	constexpr auto GetHandle() const
-	{
-		return lua;
-	}
-
 	// @throw LunaException
-	bool Run(const char* lua)
+	inline bool Run(const char* lua)
 	{
 		if (!this->lua || !lua)
 			return false;
@@ -121,7 +116,7 @@ public:
 		return true;
 	}
 	// @throw LunaException
-	bool RunFile(const char* path)
+	inline bool RunFile(const char* path)
 	{
 		if (!lua || !path)
 			return false;
@@ -133,7 +128,7 @@ public:
 	}
 
 	template<typename T>
-	bool GetGlobal(const char* name, T& value) const
+	inline bool GetGlobal(const char* name, T& value) const
 	{
 		if (!lua || !name)
 			return false;
@@ -182,7 +177,7 @@ public:
 			static_assert(false, "Type not supported");
 	}
 	template<typename T>
-	bool GetGlobal(const char* name, T*& value) const
+	inline bool GetGlobal(const char* name, T*& value) const
 	{
 		int type;
 
@@ -202,7 +197,7 @@ public:
 
 		return true;
 	}
-	bool GetGlobal(const char* name, bool& value) const
+	inline bool GetGlobal(const char* name, bool& value) const
 	{
 		int type;
 
@@ -222,7 +217,7 @@ public:
 
 		return true;
 	}
-	bool GetGlobal(const char* name, char& value) const
+	inline bool GetGlobal(const char* name, char& value) const
 	{
 		int type;
 
@@ -255,7 +250,7 @@ public:
 
 		return true;
 	}
-	bool GetGlobal(const char* name, std::string& value) const
+	inline bool GetGlobal(const char* name, std::string& value) const
 	{
 		int type;
 
@@ -280,7 +275,7 @@ public:
 		return true;
 	}
 	template<typename F>
-	bool GetGlobal(const char* name, LunaFunction<F>& value) const
+	inline bool GetGlobal(const char* name, LunaFunction<F>& value) const
 	{
 		int type;
 
@@ -309,7 +304,7 @@ public:
 	}
 
 	template<typename T>
-	bool SetGlobal(const char* name, const T& value)
+	inline bool SetGlobal(const char* name, const T& value)
 	{
 		if (!lua || !name)
 			return false;
@@ -320,7 +315,7 @@ public:
 		return true;
 	}
 	template<typename T, typename ... TArgs>
-	bool SetGlobal(const char* name, T(*value)(TArgs ...))
+	inline bool SetGlobal(const char* name, T(*value)(TArgs ...))
 	{
 		if (!lua || !name)
 			return false;
@@ -338,7 +333,7 @@ public:
 		return true;
 	}
 	template<typename T, typename ... TArgs>
-	bool SetGlobal(const char* name, const std::function<T(TArgs ...)>& value)
+	inline bool SetGlobal(const char* name, const std::function<T(TArgs ...)>& value)
 	{
 		if (!lua || !name)
 			return false;
@@ -356,7 +351,7 @@ public:
 		return true;
 	}
 
-	bool LoadLibrary(int mask)
+	inline bool LoadLibrary(int mask)
 	{
 		if (!lua)
 			return false;
@@ -366,7 +361,7 @@ public:
 		return true;
 	}
 
-	bool RemoveGlobal(const char* name)
+	inline bool RemoveGlobal(const char* name)
 	{
 		if (!lua || !name)
 			return false;
@@ -863,11 +858,6 @@ public:
 		return context && (context->Type == Luna::FUNCTION_TYPE_LUA);
 	}
 
-	constexpr auto GetReference() const
-	{
-		return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
-	}
-
 	inline void Release()
 	{
 		if (context)
@@ -879,9 +869,17 @@ public:
 		}
 	}
 
-	constexpr       operator bool () const
+	constexpr       operator bool        () const
 	{
 		return context != nullptr;
+	}
+	constexpr       operator int         () const
+	{
+		return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
+	}
+	constexpr       operator lua_Integer () const
+	{
+		return (context && (context->Type == Luna::FUNCTION_TYPE_LUA)) ? context->Lua_Reference : LUA_NOREF;
 	}
 
 	// @throw LunaException
