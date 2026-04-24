@@ -810,6 +810,7 @@ public:
 	LunaFunction(F&& function)
 		: context(new Context{
 			.Type         = Luna::FUNCTION_TYPE_CPP,
+			.RefCount     = 1,
 			.CPP_Function = std::move(function)
 		})
 	{
@@ -817,6 +818,7 @@ public:
 	LunaFunction(T(*function)(TArgs ...))
 		: context(new Context{
 			.Type       = Luna::FUNCTION_TYPE_C,
+			.RefCount   = 1,
 			.C_Function = function
 		})
 	{
@@ -835,6 +837,7 @@ public:
 	LunaFunction(lua_State* lua, int reference, bool take_ownership)
 		: context(new Context{
 			.Type          = Luna::FUNCTION_TYPE_LUA,
+			.RefCount      = 1,
 			.Lua_State     = lua,
 			.Lua_Ownership = take_ownership,
 			.Lua_Reference = reference
