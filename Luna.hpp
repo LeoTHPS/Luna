@@ -431,9 +431,9 @@ private:
 				else
 				{
 					if (p)
-						luaL_error(lua, "String length must be 1");
+						luaL_error(lua, "String length must be 1 at index %d", index);
 
-					throw LunaException(std::format("String length must be 1"));
+					throw LunaException(std::format("String length must be 1 at index {}", index));
 				}
 			}
 			else
@@ -509,9 +509,9 @@ private:
 		if (string_length != 1)
 		{
 			if (p)
-				luaL_error(lua, "String length must be 1");
+				luaL_error(lua, "String length must be 1 at index %d", index);
 
-			throw LunaException("String length must be 1");
+			throw LunaException("String length must be 1 at index {}", index);
 		}
 
 		value = string_length ? *string : 0;
