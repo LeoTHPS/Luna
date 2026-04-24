@@ -10,5 +10,5 @@ add_library(Luna INTERFACE)
 target_link_libraries(Luna INTERFACE lua550)
 target_include_directories(Luna INTERFACE ${CMAKE_CURRENT_LIST_DIR})
 
-# add_executable(demo demo.cpp)
-# target_link_libraries(demo Luna)
+add_executable(demo demo.cpp)
+target_link_libraries(demo Luna)
