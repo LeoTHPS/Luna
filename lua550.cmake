@@ -44,7 +44,8 @@ add_library(lua550 STATIC
 	${lua550_external_SOURCE_DIR}/src/lvm.c
 	${lua550_external_SOURCE_DIR}/src/lzio.c
 )
-target_compile_definitions(lua550 PUBLIC -DLUA_COMPAT_5_3=1)
+
+# target_compile_definitions(lua550 PUBLIC -DLUA_COMPAT_5_3=1)
 target_include_directories(lua550 PUBLIC ${lua550_external_SOURCE_DIR}/src/)
 
 if(UNIX)
