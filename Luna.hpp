@@ -150,6 +150,130 @@ public:
 	}
 };
 
+class LunaLibrary
+{
+	friend Luna;
+
+	struct Context
+	{
+		bool       IsLoaded;
+
+		size_t     RefCount;
+
+		lua_State* Lua_State;
+		bool       Lua_Ownership;
+		int        Lua_Reference;
+
+		~Context()
+		{
+			if (Lua_Ownership)
+				luaL_unref(Lua_State, LUA_REGISTRYINDEX, Lua_Reference);
+		}
+	};
+
+	Context* context;
+
+public:
+	LunaLibrary()
+		: context(nullptr)
+	{
+	}
+	LunaLibrary(LunaLibrary&& library)
+		: context(library.context)
+	{
+		library.context = nullptr;
+	}
+	LunaLibrary(const LunaLibrary& library)
+		: context(library.context)
+	{
+		if (context)
+			++context->RefCount;
+	}
+	LunaLibrary(lua_State* lua, int reference, bool take_ownership)
+		: context(new Context{
+			.RefCount      = 1,
+			.Lua_State     = lua,
+			.Lua_Ownership = take_ownership,
+			.Lua_Reference = reference
+		})
+	{
+	}
+
+	bool IsLoaded() const
+	{
+		return context && context->IsLoaded;
+	}
+
+	// @throw LunaException
+	template<typename T>
+	bool GetField(const char* name, T& value) const;
+
+	template<typename T>
+	bool SetField(const char* name, const T& value);
+
+	void Release()
+	{
+		if (context)
+		{
+			if (!--context->RefCount)
+				delete context;
+
+			context = nullptr;
+		}
+	}
+
+	operator bool        () const
+	{
+		return context != nullptr;
+	}
+	operator int         () const
+	{
+		return context ? context->Lua_Reference : LUA_NOREF;
+	}
+	operator lua_Integer () const
+	{
+		return context ? context->Lua_Reference : LUA_NOREF;
+	}
+
+	auto& operator = (LunaLibrary&& library)
+	{
+		Release();
+
+		context = library.context;
+		library.context = nullptr;
+
+		return *this;
+	}
+	auto& operator = (const LunaLibrary& library)
+	{
+		Release();
+
+		if (library.context)
+		{
+			context = library.context;
+
+			++context->RefCount;
+		}
+
+		return *this;
+	}
+
+	bool operator == (const LunaLibrary& library) const
+	{
+		if (context == library.context)
+			return true;
+
+		if (context && library.context)
+			return context->Lua_Reference == library.context->Lua_Reference;
+
+		return false;
+	}
+	bool operator != (const LunaLibrary& library) const
+	{
+		return context != library.context;
+	}
+};
+
 template<typename T, typename ... TArgs>
 class LunaFunction<T(TArgs ...)>
 {
@@ -318,6 +442,7 @@ public:
 class Luna
 {
 	friend class LunaTable;
+	friend class LunaLibrary;
 	template<typename F>
 	friend class LunaFunction;
 
@@ -420,6 +545,26 @@ public:
 
 		return true;
 	}
+	bool LoadLibrary(const LunaLibrary& value, const char* name, bool global)
+	{
+		if (!lua || !value || value.IsLoaded())
+			return false;
+
+		luaL_getsubtable(lua, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
+		lua_rawgeti(lua, LUA_REGISTRYINDEX, value);
+		lua_setfield(lua, -2, name);
+		lua_pop(lua, 1);
+
+		if (global)
+		{
+			lua_rawgeti(lua, LUA_REGISTRYINDEX, value);
+			lua_setglobal(lua, name);
+		}
+
+		value.context->IsLoaded = true;
+
+		return true;
+	}
 
 	auto CreateTable()
 	{
@@ -435,6 +580,25 @@ public:
 				lua_pop(lua, 1);
 			else
 				value = LunaTable(lua, reference, true);
+		}
+
+		return value;
+	}
+
+	auto CreateLibrary()
+	{
+		LunaLibrary value;
+
+		if (lua)
+		{
+			lua_newtable(lua);
+
+			int reference;
+
+			if ((reference = luaL_ref(lua, LUA_REGISTRYINDEX)) == LUA_NOREF)
+				lua_pop(lua, 1);
+			else
+				value = LunaLibrary(lua, reference, true);
 		}
 
 		return value;
@@ -928,6 +1092,32 @@ inline bool LunaTable::GetField(const char* name, T& value) const
 }
 template<typename T>
 inline bool LunaTable::SetField(const char* name, const T& value)
+{
+	if (!context || !name)
+		return false;
+
+	lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference);
+	Luna::Stack_Push(context->Lua_State, value, false);
+	lua_setfield(context->Lua_State, -2, name);
+	lua_pop(context->Lua_State, 1);
+
+	return true;
+}
+
+template<typename T>
+inline bool LunaLibrary::GetField(const char* name, T& value) const
+{
+	if (!context || !name)
+		return false;
+
+	lua_rawgeti(context->Lua_State, LUA_REGISTRYINDEX, context->Lua_Reference);
+	Luna::Stack_Pop(context->Lua_State, value, false);
+	lua_pop(context->Lua_State, 1);
+
+	return true;
+}
+template<typename T>
+inline bool LunaLibrary::SetField(const char* name, const T& value)
 {
 	if (!context || !name)
 		return false;

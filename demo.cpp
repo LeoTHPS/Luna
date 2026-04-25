@@ -26,6 +26,14 @@ int main(int argc, char* argv[])
 		luna.SetGlobal("time", time);
 	}
 
+	if (auto time = luna.CreateLibrary())
+	{
+		time.SetField("now",     &time_now);
+		time.SetField("elapsed", &time_elapsed);
+
+		luna.LoadLibrary(time, "libtime", true);
+	}
+
 	luna.SetGlobal("time_now",     &time_now);
 	luna.SetGlobal("time_elapsed", &time_elapsed);
 
