@@ -990,7 +990,7 @@ private:
 	}
 	static int  Stack_Push(lua_State* lua, const std::string& value, bool p)
 	{
-		lua_pushexternalstring(lua, value.c_str(), value.length(), nullptr, nullptr);
+		lua_pushlstring(lua, value.c_str(), value.length());
 
 		return 1;
 	}
